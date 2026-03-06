@@ -16,6 +16,8 @@ SCRIPT_PATH = Path(__file__).resolve().parent / "run_grok_prompt_bfcl_ralph.py"
 MOD = runpy.run_path(str(SCRIPT_PATH))
 
 parse_categories = MOD["parse_categories"]
+list_ralph_variants = MOD["list_ralph_variants"]
+get_ralph_variant = MOD["get_ralph_variant"]
 validate_args = MOD["validate_args"]
 validate_run_ids_categories = MOD["validate_run_ids_categories"]
 check_grok_api_key = MOD["check_grok_api_key"]
@@ -91,6 +93,20 @@ class TestRunGrokBfclRalph(unittest.TestCase):
     def test_parse_categories_dedup_preserves_first_order(self) -> None:
         got = parse_categories("simple_python,multiple,simple_python,parallel,,multiple")
         self.assertEqual(got, ["simple_python", "multiple", "parallel"])
+
+    def test_ralph_variant_helpers_cover_new_variants(self) -> None:
+        variants = list_ralph_variants()
+        self.assertIn("minimal", variants)
+        self.assertIn("coverage", variants)
+        self.assertIn("parallel-safe", variants)
+        self.assertIn("call-count", variants)
+
+        minimal = get_ralph_variant("minimal")
+        self.assertEqual(minimal["name"], "minimal")
+        self.assertEqual(minimal["label"], "RALPH Loop Minimal")
+
+        with self.assertRaises(SystemExit):
+            get_ralph_variant("not-a-variant")
 
     def test_validate_args_rejects_bad_values(self) -> None:
         bad_cases = [

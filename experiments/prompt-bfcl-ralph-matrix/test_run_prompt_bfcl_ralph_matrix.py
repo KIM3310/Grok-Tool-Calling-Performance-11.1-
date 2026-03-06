@@ -28,6 +28,7 @@ build_matrix_report = MOD["build_matrix_report"]
 run_single_model = MOD["run_single_model"]
 should_attempt_eval_only_salvage = MOD["should_attempt_eval_only_salvage"]
 attempt_score_json_summary_salvage = MOD["attempt_score_json_summary_salvage"]
+register_custom_models_for_entry = MOD["register_custom_models_for_entry"]
 
 
 class TestRunPromptBfclRalphMatrix(unittest.TestCase):
@@ -112,6 +113,7 @@ class TestRunPromptBfclRalphMatrix(unittest.TestCase):
                 "model_name": "qwen/test",
                 "base_url": "https://openrouter.ai/api/v1",
                 "default_headers_json": '{"HTTP-Referer":"https://example.com"}',
+                "ralph_variant": "compact",
             },
             args=args,
             runtime_root=Path("/tmp/runtime/openrouter"),
@@ -119,6 +121,8 @@ class TestRunPromptBfclRalphMatrix(unittest.TestCase):
         self.assertIn("run_openai_compatible_prompt_bfcl_ralph.py", openai_cmd[1])
         self.assertIn("--skip-model-check", openai_cmd)
         self.assertIn("https://openrouter.ai/api/v1", openai_cmd)
+        self.assertIn("--ralph-variant", openai_cmd)
+        self.assertIn("compact", openai_cmd)
 
         kiro_cmd = build_child_command(
             entry={
@@ -156,6 +160,7 @@ class TestRunPromptBfclRalphMatrix(unittest.TestCase):
                 "overall_relative_delta_percent": 20.0,
                 "salvaged": True,
                 "salvage_note": "Recovered via eval-only salvage",
+                "ralph_variant": "compact",
             },
             {
                 "id": "model-b",
@@ -173,6 +178,7 @@ class TestRunPromptBfclRalphMatrix(unittest.TestCase):
                 "error_message": "missing key",
                 "salvaged": False,
                 "salvage_note": None,
+                "ralph_variant": "default",
             },
         ]
         args = SimpleNamespace(
@@ -192,7 +198,10 @@ class TestRunPromptBfclRalphMatrix(unittest.TestCase):
         self.assertEqual(classify_outcome(0.0, 0.0), "flat")
         self.assertEqual(classify_outcome(1.0, 0.0), "improved")
         self.assertIn("# Prompt-Mode BFCL RALPH Matrix Report", report)
-        self.assertIn("| model-a | grok | improved | 10.00 | 12.00 | +2.00 | +20.00% |", report)
+        self.assertIn(
+            "| model-a | grok | compact | improved | 10.00 | 12.00 | +2.00 | +20.00% |",
+            report,
+        )
         self.assertIn("## Salvaged", report)
         self.assertIn("Recovered via eval-only salvage", report)
         self.assertIn("missing key", report)
@@ -410,11 +419,35 @@ class TestRunPromptBfclRalphMatrix(unittest.TestCase):
         self.assertIsNotNone(summary)
         assert summary is not None
         self.assertEqual(summary["cases_per_category"], 1)
-        self.assertEqual(summary["categories"], ["simple_python", "multiple", "parallel", "parallel_multiple"])
+        self.assertEqual(
+            summary["categories"],
+            ["simple_python", "multiple", "parallel", "parallel_multiple"],
+        )
         self.assertGreater(
             summary["metrics_percent_point"]["Overall Acc"]["delta"],
             0.0,
         )
+
+    def test_register_custom_models_for_entry_passes_ralph_variant(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        def fake_register_custom_models(**kwargs):
+            calls.append(kwargs)
+            return ("baseline", "ralph", "Baseline", "RALPH")
+
+        entry = {
+            "id": "ollama-llama3-2-minimal",
+            "kind": "openai-compatible",
+            "provider_name": "Ollama",
+            "model_name": "llama3.2:latest",
+            "ralph_variant": "minimal",
+        }
+
+        runner_module = {"register_custom_models": fake_register_custom_models}
+        register_custom_models_for_entry(runner_module, entry)
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["ralph_variant_name"], "minimal")
 
 
 if __name__ == "__main__":

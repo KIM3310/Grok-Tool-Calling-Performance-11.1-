@@ -22,6 +22,7 @@ ensure_runtime_layout = MOD["ensure_runtime_layout"]
 build_markdown_report = MOD["build_markdown_report"]
 require_api_key = MOD["require_api_key"]
 require_base_url = MOD["require_base_url"]
+register_custom_models = MOD["register_custom_models"]
 
 
 class TestRunOpenAICompatibleBfclRalph(unittest.TestCase):
@@ -135,6 +136,22 @@ class TestRunOpenAICompatibleBfclRalph(unittest.TestCase):
         self.assertIn("# OpenAI-Compatible Prompt-Mode BFCL Benchmark Report", report)
         self.assertIn("- Provider: `OpenRouter`", report)
         self.assertIn("| Overall Acc | 10.00 | 12.00 | +2.00 |", report)
+
+    def test_register_custom_models_uses_variant_specific_registry_name(self) -> None:
+        baseline_registry, ralph_registry, baseline_display, ralph_display = (
+            register_custom_models(
+                model_name="qwen/test",
+                request_timeout_sec=30.0,
+                provider_name="OpenRouter",
+                provider_docs_url="https://openrouter.ai/api/v1",
+                provider_license="Proprietary",
+                ralph_variant_name="minimal",
+            )
+        )
+        self.assertEqual(baseline_registry, "qwen/test-prompt-baseline")
+        self.assertEqual(ralph_registry, "qwen/test-prompt-ralph-loop-minimal")
+        self.assertEqual(baseline_display, "qwen/test (Prompt Baseline)")
+        self.assertEqual(ralph_display, "qwen/test (Prompt + RALPH Loop Minimal)")
 
 
 if __name__ == "__main__":

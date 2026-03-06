@@ -63,3 +63,4 @@ experiments/*/runtime/
 experiments/*/runtime-*/
 experiments/*/.pytest_cache/
 experiments/*/models.local.json
+experiments/*/*.local.json

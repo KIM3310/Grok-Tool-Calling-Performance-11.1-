@@ -318,6 +318,13 @@ def env_value_from_entry(entry: dict[str, Any], field: str) -> str | None:
     return None
 
 
+def resolve_ralph_variant_name(entry: dict[str, Any]) -> str:
+    raw_variant = entry.get("ralph_variant")
+    if isinstance(raw_variant, str) and raw_variant.strip():
+        return raw_variant.strip().lower()
+    return "default"
+
+
 def build_child_env(entry: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
     child_env = os.environ.copy()
     missing: list[str] = []
@@ -380,12 +387,32 @@ def load_runner_module(kind: str) -> dict[str, Any]:
 
 
 def resolve_registry_names(
+    *,
+    kind: str,
     model_name: str,
+    ralph_variant_name: str = "default",
 ) -> tuple[str, str, str, str]:
+    if kind == "grok":
+        baseline_registry = f"{model_name}-baseline-prompt"
+        if ralph_variant_name == "default":
+            ralph_registry = f"{model_name}-ralph-loop-prompt"
+            ralph_display = f"{model_name} (Prompt + RALPH Loop)"
+        else:
+            variant_title = ralph_variant_name.replace("-", " ").title()
+            ralph_registry = f"{model_name}-ralph-loop-{ralph_variant_name}-prompt"
+            ralph_display = f"{model_name} (Prompt + RALPH Loop {variant_title})"
+        baseline_display = f"{model_name} (Prompt Baseline)"
+        return baseline_registry, ralph_registry, baseline_display, ralph_display
+
     baseline_registry = f"{model_name}-prompt-baseline"
-    ralph_registry = f"{model_name}-prompt-ralph-loop"
+    if ralph_variant_name == "default":
+        ralph_registry = f"{model_name}-prompt-ralph-loop"
+        ralph_display = f"{model_name} (Prompt + RALPH Loop)"
+    else:
+        variant_title = ralph_variant_name.replace("-", " ").title()
+        ralph_registry = f"{model_name}-prompt-ralph-loop-{ralph_variant_name}"
+        ralph_display = f"{model_name} (Prompt + RALPH Loop {variant_title})"
     baseline_display = f"{model_name} (Prompt Baseline)"
-    ralph_display = f"{model_name} (Prompt + RALPH Loop)"
     return baseline_registry, ralph_registry, baseline_display, ralph_display
 
 
@@ -412,8 +439,10 @@ def build_expected_result_paths(
         get_file_name_by_category,
     )
 
-    baseline_registry, ralph_registry, _baseline_display, _ralph_display = (
-        resolve_registry_names(entry["model_name"])
+    baseline_registry, ralph_registry, _baseline_display, _ralph_display = resolve_registry_names(
+        kind=entry["kind"],
+        model_name=entry["model_name"],
+        ralph_variant_name=resolve_ralph_variant_name(entry),
     )
     expected_paths: list[Path] = []
     categories = resolve_effective_categories(args)
@@ -505,16 +534,19 @@ def register_custom_models_for_entry(
     request_timeout_sec = float(
         entry.get("request_timeout_sec", DEFAULT_REQUEST_TIMEOUT_SEC)
     )
+    ralph_variant_name = resolve_ralph_variant_name(entry)
     if entry["kind"] == "grok":
         return runner_module["register_custom_models"](
             model_name=entry["model_name"],
             request_timeout_sec=request_timeout_sec,
+            ralph_variant_name=ralph_variant_name,
         )
 
     if entry["kind"] == "openai-compatible":
         return runner_module["register_custom_models"](
             model_name=entry["model_name"],
             request_timeout_sec=request_timeout_sec,
+            ralph_variant_name=ralph_variant_name,
             provider_name=entry["provider_name"],
             provider_docs_url=entry.get("provider_docs_url"),
             provider_license=entry.get("provider_license", "Unknown"),
@@ -1113,6 +1145,9 @@ def build_child_command(
             "--error-report-json",
             "error_forensics.json",
         ]
+        ralph_variant = resolve_ralph_variant_name(entry)
+        if ralph_variant != "default":
+            command.extend(["--ralph-variant", ralph_variant])
         if args.include_input_log:
             command.append("--include-input-log")
         if args.allow_agentic_run_ids:
@@ -1222,6 +1257,9 @@ def build_child_command(
         "--error-report-json",
         "error_forensics.json",
     ]
+    ralph_variant = resolve_ralph_variant_name(entry)
+    if ralph_variant != "default":
+        command.extend(["--ralph-variant", ralph_variant])
 
     provider_docs_url = entry.get("provider_docs_url")
     if isinstance(provider_docs_url, str) and provider_docs_url.strip():
@@ -1353,6 +1391,7 @@ def make_run_record(
         "kind": entry["kind"],
         "provider_name": entry.get("provider_name", "xAI" if entry["kind"] == "grok" else None),
         "model_name": entry["model_name"],
+        "ralph_variant": resolve_ralph_variant_name(entry),
         "runtime_root": str(runtime_root),
         "command": command,
         "started_at_utc": started_at,
@@ -1566,8 +1605,8 @@ def build_matrix_report(summary: dict[str, Any]) -> str:
         "",
         "## Leaderboard",
         "",
-        "| Model | Kind | Outcome | Baseline | RALPH | Delta (pp) | Relative Delta |",
-        "|---|---|---|---:|---:|---:|---:|",
+        "| Model | Kind | RALPH Variant | Outcome | Baseline | RALPH | Delta (pp) | Relative Delta |",
+        "|---|---|---|---|---:|---:|---:|---:|",
     ]
 
     for record in records:
@@ -1575,12 +1614,13 @@ def build_matrix_report(summary: dict[str, Any]) -> str:
         ralph = record.get("overall_ralph")
         delta = record.get("overall_delta_pp")
         rel = record.get("overall_relative_delta_percent")
+        variant = record.get("ralph_variant") or "default"
         baseline_txt = "N/A" if baseline is None else f"{baseline:.2f}"
         ralph_txt = "N/A" if ralph is None else f"{ralph:.2f}"
         delta_txt = "N/A" if delta is None else f"{delta:+.2f}"
         rel_txt = "N/A" if rel is None else f"{rel:+.2f}%"
         lines.append(
-            f"| {record['id']} | {record['kind']} | {record['outcome']} | "
+            f"| {record['id']} | {record['kind']} | {variant} | {record['outcome']} | "
             f"{baseline_txt} | {ralph_txt} | {delta_txt} | {rel_txt} |"
         )
 

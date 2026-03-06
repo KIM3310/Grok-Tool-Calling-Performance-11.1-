@@ -27,6 +27,8 @@ DEFAULT_CATEGORIES = SHARED["DEFAULT_CATEGORIES"]
 RALPH_SYSTEM_PROMPT_SUFFIX = SHARED["RALPH_SYSTEM_PROMPT_SUFFIX"]
 RALPH_PREFLIGHT_PROMPT = SHARED["RALPH_PREFLIGHT_PROMPT"]
 RALPH_FINAL_PROMPT = SHARED["RALPH_FINAL_PROMPT"]
+get_ralph_variant = SHARED["get_ralph_variant"]
+list_ralph_variants = SHARED["list_ralph_variants"]
 format_missing_dependency_error = SHARED["format_missing_dependency_error"]
 parse_categories = SHARED["parse_categories"]
 resolve_runtime_categories = SHARED["resolve_runtime_categories"]
@@ -198,6 +200,15 @@ def parse_args() -> argparse.Namespace:
         default=20,
         help="Override BFCL MAXIMUM_STEP_LIMIT to cap per-turn tool-call loops.",
     )
+    parser.add_argument(
+        "--ralph-variant",
+        type=str,
+        default="default",
+        help=(
+            "RALPH loop prompt variant. "
+            f"Supported: {', '.join(list_ralph_variants())}"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -240,6 +251,7 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SystemExit("--request-timeout-sec must be > 0.")
     if args.max_step_limit <= 0:
         raise SystemExit("--max-step-limit must be >= 1.")
+    get_ralph_variant(getattr(args, "ralph_variant", "default"))
 
 
 def require_api_key(cli_value: str | None) -> str:
@@ -436,6 +448,7 @@ def register_custom_models(
     provider_name: str,
     provider_docs_url: str | None,
     provider_license: str,
+    ralph_variant_name: str = "default",
 ) -> tuple[str, str, str, str]:
     try:
         from bfcl_eval.constants.model_config import MODEL_CONFIG_MAPPING, ModelConfig
@@ -444,6 +457,12 @@ def register_custom_models(
         )
     except ModuleNotFoundError as exc:
         raise SystemExit(format_missing_dependency_error(exc)) from exc
+
+    ralph_variant = get_ralph_variant(ralph_variant_name)
+    system_prompt_suffix = str(ralph_variant["system_prompt_suffix"])
+    preflight_prompt = str(ralph_variant["preflight_prompt"])
+    final_prompt = str(ralph_variant["final_prompt"])
+    analysis_context_chars = int(ralph_variant["analysis_context_chars"])
 
     class OpenAICompatibleTimeoutPromptHandler(OpenAICompletionsHandler):
         def generate_with_backoff(self, **kwargs):
@@ -489,12 +508,12 @@ def register_custom_models(
             first_turn = test_entry["question"][0]
             if first_turn and first_turn[0].get("role") == "system":
                 first_turn[0]["content"] = (
-                    f"{first_turn[0]['content']}\n\n{RALPH_SYSTEM_PROMPT_SUFFIX}"
+                    f"{first_turn[0]['content']}\n\n{system_prompt_suffix}"
                 )
             else:
                 first_turn.insert(
                     0,
-                    {"role": "system", "content": RALPH_SYSTEM_PROMPT_SUFFIX},
+                    {"role": "system", "content": system_prompt_suffix},
                 )
             return inference_data
 
@@ -511,7 +530,7 @@ def register_custom_models(
             base_messages = deepcopy(inference_data["message"])
 
             analysis_messages = deepcopy(base_messages)
-            analysis_messages.append({"role": "system", "content": RALPH_PREFLIGHT_PROMPT})
+            analysis_messages.append({"role": "system", "content": preflight_prompt})
             analysis_response, analysis_latency = self.generate_with_backoff(
                 messages=analysis_messages,
                 model=self.model_name,
@@ -529,16 +548,17 @@ def register_custom_models(
                         "role": "system",
                         "content": (
                             "Internal RALPH checklist (do not quote this in output):\n"
-                            f"{analysis_text[:1200]}"
+                            f"{analysis_text[:analysis_context_chars]}"
                         ),
                     }
                 )
-            final_messages.append({"role": "system", "content": RALPH_FINAL_PROMPT})
+            final_messages.append({"role": "system", "content": final_prompt})
 
             inference_data["inference_input_log"] = {
                 "base_message": repr(base_messages),
-                "ralph_analysis_prompt": RALPH_PREFLIGHT_PROMPT,
-                "ralph_final_prompt": RALPH_FINAL_PROMPT,
+                "ralph_variant": ralph_variant["name"],
+                "ralph_analysis_prompt": preflight_prompt,
+                "ralph_final_prompt": final_prompt,
             }
 
             final_response, final_latency = self.generate_with_backoff(
@@ -577,9 +597,12 @@ def register_custom_models(
             return response_data
 
     baseline_registry = f"{model_name}-prompt-baseline"
-    ralph_registry = f"{model_name}-prompt-ralph-loop"
+    if ralph_variant["name"] == "default":
+        ralph_registry = f"{model_name}-prompt-ralph-loop"
+    else:
+        ralph_registry = f"{model_name}-prompt-ralph-loop-{ralph_variant['name']}"
     baseline_display = f"{model_name} (Prompt Baseline)"
-    ralph_display = f"{model_name} (Prompt + RALPH Loop)"
+    ralph_display = f"{model_name} (Prompt + {ralph_variant['label']})"
 
     model_url = provider_docs_url or os.getenv("OPENAI_BASE_URL") or "Unknown"
 
@@ -778,6 +801,7 @@ def main() -> None:
         provider_name=args.provider_name,
         provider_docs_url=args.provider_docs_url,
         provider_license=args.provider_license,
+        ralph_variant_name=args.ralph_variant,
     )
     print("Registered custom models:", baseline_registry, ralph_registry)
 
