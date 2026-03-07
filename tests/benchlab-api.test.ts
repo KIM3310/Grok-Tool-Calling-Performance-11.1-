@@ -163,7 +163,39 @@ function createBenchLabFixtureRoot() {
     join(artifactRoot, "data_overall.csv"),
     "metric,baseline,ralph,delta\nOverall Acc,6.08,7.33,1.25\n"
   );
-  writeFileSync(join(artifactRoot, "error_forensics.json"), "{}\n");
+  writeFileSync(
+    join(artifactRoot, "error_forensics.json"),
+    JSON.stringify(
+      {
+        registries: {
+          "qwen3.5:4b-prompt-baseline": {
+            error_items: 6,
+            error_reasons: [
+              {
+                count: 6,
+                reason: "timeout",
+                sample_ids: ["multiple_5", "multiple_6", "multiple_7"],
+              },
+            ],
+            total_items: 40,
+          },
+          "qwen3.5:4b-prompt-ralph-loop-minimal": {
+            error_items: 1,
+            error_reasons: [
+              {
+                count: 1,
+                reason: "timeout",
+                sample_ids: ["multiple_7"],
+              },
+            ],
+            total_items: 40,
+          },
+        },
+      },
+      null,
+      2
+    )
+  );
   writeFileSync(
     join(artifactRoot, "benchmark-ollama-qwen3-5-4b-10-minimal.svg"),
     '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="20"><text x="10" y="14">qwen snapshot</text></svg>\n'
@@ -202,6 +234,7 @@ function createBenchLabFixtureRoot() {
       "",
     ].join("\n")
   );
+  writeFileSync(join(olderArtifactRoot, "error_forensics.json"), "{}\n");
 
   const compareLeftRoot = writeRuntimeFixture(
     matrixRoot,
@@ -464,6 +497,58 @@ describe("benchlab api", () => {
       }),
     ]);
 
+    const artifactForensicsResponse = await fetch(
+      `${baseUrl}/v1/benchlab/artifacts/forensics`
+    );
+    const artifactForensicsPayload = await artifactForensicsResponse.json();
+    expect(artifactForensicsResponse.status).toBe(200);
+    expect(artifactForensicsPayload.summary).toEqual(
+      expect.objectContaining({
+        artifacts: 2,
+        artifactsWithErrorBuckets: 1,
+        artifactsWithForensicsFile: 2,
+        artifactsWithTrackedErrors: 1,
+        baselineErrorItems: 6,
+        dominantBucket: "timeout",
+        ralphErrorItems: 1,
+      })
+    );
+    expect(artifactForensicsPayload.buckets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          baselineCount: 6,
+          bucket: "timeout",
+          deltaCount: -5,
+          ralphCount: 1,
+        }),
+      ])
+    );
+    expect(artifactForensicsPayload.claims).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          artifactId:
+            "openai-compatible-prompt-bfcl-ralph::claim-ollama-qwen3-5-4b-10-minimal",
+          baselineErrorItems: 6,
+          dominantBucket: "timeout",
+          hasErrorBuckets: true,
+          ralphErrorItems: 1,
+        }),
+        expect.objectContaining({
+          artifactId:
+            "openai-compatible-prompt-bfcl-ralph::claim-ollama-qwen3-5-4b-5-default",
+          hasErrorBuckets: false,
+          hasForensicsFile: true,
+        }),
+      ])
+    );
+    expect(artifactForensicsPayload.gaps).toEqual([
+      expect.objectContaining({
+        artifactId:
+          "openai-compatible-prompt-bfcl-ralph::claim-ollama-qwen3-5-4b-5-default",
+        gap: "no_error_buckets",
+      }),
+    ]);
+
     const artifactDetailResponse = await fetch(
       `${baseUrl}/v1/benchlab/artifacts/${encodeURIComponent(
         "openai-compatible-prompt-bfcl-ralph::claim-ollama-qwen3-5-4b-10-minimal"
@@ -473,7 +558,15 @@ describe("benchlab api", () => {
     expect(artifactDetailResponse.status).toBe(200);
     expect(artifactDetailPayload.reportMarkdown).toContain("Overall Acc");
     expect(artifactDetailPayload.chartSvg).toContain("<svg");
-    expect(artifactDetailPayload.errorForensicsJson).toEqual({});
+    expect(artifactDetailPayload.errorForensicsJson).toEqual(
+      expect.objectContaining({
+        registries: expect.objectContaining({
+          "qwen3.5:4b-prompt-baseline": expect.objectContaining({
+            error_items: 6,
+          }),
+        }),
+      })
+    );
 
     const compareResponse = await fetch(
       `${baseUrl}/v1/benchlab/compare?left=runtime-compare-left&right=runtime-compare-right`

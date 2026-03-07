@@ -242,6 +242,74 @@ interface BenchLabArtifactSummary {
   updatedAt: string | null;
 }
 
+interface BenchLabParsedForensicsSummary {
+  baselineErrorItems: number;
+  baselineErrorRatePercent: number;
+  baselineTotalItems: number;
+  buckets: BenchLabForensicsBucketSummary[];
+  dominantBucket: string | null;
+  hasErrorBuckets: boolean;
+  ralphErrorItems: number;
+  ralphErrorRatePercent: number;
+  ralphTotalItems: number;
+}
+
+type BenchLabArtifactForensicsGapType =
+  | "missing_forensics_file"
+  | "no_error_buckets";
+
+interface BenchLabArtifactForensicsClaimSummary {
+  artifactId: string;
+  baselineErrorItems: number;
+  baselineErrorRatePercent: number;
+  baselineTotalItems: number;
+  buckets: BenchLabForensicsBucketSummary[];
+  claimName: string;
+  deltaErrorItems: number;
+  deltaPp: number | null;
+  dominantBucket: string | null;
+  experimentName: string;
+  hasErrorBuckets: boolean;
+  hasForensicsFile: boolean;
+  modelName: string | null;
+  outcome: BenchLabArtifactOutcome;
+  providerName: string | null;
+  ralphErrorItems: number;
+  ralphErrorRatePercent: number;
+  ralphTotalItems: number;
+  updatedAt: string | null;
+}
+
+interface BenchLabArtifactForensicsGapSummary {
+  artifactId: string;
+  claimName: string;
+  experimentName: string;
+  gap: BenchLabArtifactForensicsGapType;
+  modelName: string | null;
+  providerName: string | null;
+  updatedAt: string | null;
+}
+
+interface BenchLabArtifactForensicsOverviewSummary {
+  artifacts: number;
+  artifactsWithErrorBuckets: number;
+  artifactsWithForensicsFile: number;
+  artifactsWithTrackedErrors: number;
+  baselineErrorItems: number;
+  baselineErrorRatePercent: number;
+  baselineTotalItems: number;
+  dominantBucket: string | null;
+  flatArtifacts: number;
+  flatErrorArtifacts: number;
+  improvedArtifacts: number;
+  improvedErrorArtifacts: number;
+  ralphErrorItems: number;
+  ralphErrorRatePercent: number;
+  ralphTotalItems: number;
+  regressedArtifacts: number;
+  regressedErrorArtifacts: number;
+}
+
 const HTML_CONTENT_TYPE = "text/html; charset=utf-8";
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
@@ -853,20 +921,21 @@ function buildEmptyForensicsModelSummary(
   providerName: string | null,
   outcome: BenchLabArtifactOutcome
 ): BenchLabForensicsModelSummary {
+  const parsed = buildEmptyParsedForensicsSummary();
   return {
-    baselineErrorItems: 0,
-    baselineErrorRatePercent: 0,
-    baselineTotalItems: 0,
-    buckets: [],
-    deltaErrorItems: 0,
-    dominantBucket: null,
+    baselineErrorItems: parsed.baselineErrorItems,
+    baselineErrorRatePercent: parsed.baselineErrorRatePercent,
+    baselineTotalItems: parsed.baselineTotalItems,
+    buckets: parsed.buckets,
+    deltaErrorItems: parsed.ralphErrorItems - parsed.baselineErrorItems,
+    dominantBucket: parsed.dominantBucket,
     modelName,
     name: modelRunName,
     outcome,
     providerName,
-    ralphErrorItems: 0,
-    ralphErrorRatePercent: 0,
-    ralphTotalItems: 0,
+    ralphErrorItems: parsed.ralphErrorItems,
+    ralphErrorRatePercent: parsed.ralphErrorRatePercent,
+    ralphTotalItems: parsed.ralphTotalItems,
     runtimeName,
   };
 }
@@ -876,6 +945,20 @@ function calculateErrorRate(errorItems: number, totalItems: number): number {
     return 0;
   }
   return Number(((errorItems / totalItems) * 100).toFixed(2));
+}
+
+function buildEmptyParsedForensicsSummary(): BenchLabParsedForensicsSummary {
+  return {
+    baselineErrorItems: 0,
+    baselineErrorRatePercent: 0,
+    baselineTotalItems: 0,
+    buckets: [],
+    dominantBucket: null,
+    hasErrorBuckets: false,
+    ralphErrorItems: 0,
+    ralphErrorRatePercent: 0,
+    ralphTotalItems: 0,
+  };
 }
 
 function getForensicsRegistrySide(
@@ -1035,27 +1118,15 @@ function readRegistryForensics(
   }
 }
 
-function readModelRunForensicsSummary(
-  runtimeName: string,
-  modelRunName: string,
-  modelName: string | null,
-  providerName: string | null,
-  outcome: BenchLabArtifactOutcome,
-  errorForensicsPath: string
-): BenchLabForensicsModelSummary {
-  const payload = readJsonIfExists(errorForensicsPath);
+function parseForensicsPayload(
+  payload: Record<string, unknown> | null
+): BenchLabParsedForensicsSummary {
   if (
     !payload ||
     typeof payload.registries !== "object" ||
     payload.registries === null
   ) {
-    return buildEmptyForensicsModelSummary(
-      runtimeName,
-      modelRunName,
-      modelName,
-      providerName,
-      outcome
-    );
+    return buildEmptyParsedForensicsSummary();
   }
 
   const bucketMap = new Map<
@@ -1084,8 +1155,6 @@ function readModelRunForensicsSummary(
   }
 
   const buckets = finalizeForensicsBuckets(bucketMap);
-  const dominantBucket = buckets[0]?.bucket ?? null;
-
   return {
     baselineErrorItems: totals.baselineErrorItems,
     baselineErrorRatePercent: calculateErrorRate(
@@ -1094,18 +1163,233 @@ function readModelRunForensicsSummary(
     ),
     baselineTotalItems: totals.baselineTotalItems,
     buckets,
-    deltaErrorItems: totals.ralphErrorItems - totals.baselineErrorItems,
-    dominantBucket,
-    modelName,
-    name: modelRunName,
-    outcome,
-    providerName,
+    dominantBucket: buckets[0]?.bucket ?? null,
+    hasErrorBuckets: buckets.length > 0,
     ralphErrorItems: totals.ralphErrorItems,
     ralphErrorRatePercent: calculateErrorRate(
       totals.ralphErrorItems,
       totals.ralphTotalItems
     ),
     ralphTotalItems: totals.ralphTotalItems,
+  };
+}
+
+function compareArtifactForensicsClaims(
+  left: BenchLabArtifactForensicsClaimSummary,
+  right: BenchLabArtifactForensicsClaimSummary
+): number {
+  if (left.hasErrorBuckets !== right.hasErrorBuckets) {
+    return left.hasErrorBuckets ? -1 : 1;
+  }
+  if (left.deltaErrorItems !== right.deltaErrorItems) {
+    return left.deltaErrorItems - right.deltaErrorItems;
+  }
+  const leftDelta = left.deltaPp ?? Number.NEGATIVE_INFINITY;
+  const rightDelta = right.deltaPp ?? Number.NEGATIVE_INFINITY;
+  if (leftDelta !== rightDelta) {
+    return rightDelta - leftDelta;
+  }
+  const leftUpdated = left.updatedAt ? Date.parse(left.updatedAt) : 0;
+  const rightUpdated = right.updatedAt ? Date.parse(right.updatedAt) : 0;
+  return rightUpdated - leftUpdated;
+}
+
+function readArtifactForensicsClaimSummary(
+  repoRoot: string,
+  artifact: BenchLabArtifactSummary
+): BenchLabArtifactForensicsClaimSummary {
+  const parsed = parseForensicsPayload(
+    artifact.errorForensicsRelativePath
+      ? readJsonIfExists(join(repoRoot, artifact.errorForensicsRelativePath))
+      : null
+  );
+  return {
+    artifactId: artifact.id,
+    baselineErrorItems: parsed.baselineErrorItems,
+    baselineErrorRatePercent: parsed.baselineErrorRatePercent,
+    baselineTotalItems: parsed.baselineTotalItems,
+    buckets: parsed.buckets,
+    claimName: artifact.claimName,
+    deltaErrorItems: parsed.ralphErrorItems - parsed.baselineErrorItems,
+    deltaPp: artifact.deltaPp,
+    dominantBucket: parsed.dominantBucket,
+    experimentName: artifact.experimentName,
+    hasErrorBuckets: parsed.hasErrorBuckets,
+    hasForensicsFile: artifact.errorForensicsRelativePath !== null,
+    modelName: artifact.modelName,
+    outcome: artifact.outcome,
+    providerName: artifact.providerName,
+    ralphErrorItems: parsed.ralphErrorItems,
+    ralphErrorRatePercent: parsed.ralphErrorRatePercent,
+    ralphTotalItems: parsed.ralphTotalItems,
+    updatedAt: artifact.updatedAt,
+  };
+}
+
+function listArtifactForensicsOverview(repoRoot: string): {
+  buckets: BenchLabForensicsBucketSummary[];
+  claims: BenchLabArtifactForensicsClaimSummary[];
+  gaps: BenchLabArtifactForensicsGapSummary[];
+  summary: BenchLabArtifactForensicsOverviewSummary;
+} {
+  const claims = listArtifactSummaries(repoRoot)
+    .map((artifact) => readArtifactForensicsClaimSummary(repoRoot, artifact))
+    .sort(compareArtifactForensicsClaims);
+  const bucketMap = new Map<
+    string,
+    { baselineCount: number; ralphCount: number; sampleIds: Set<string> }
+  >();
+  const gaps: BenchLabArtifactForensicsGapSummary[] = [];
+
+  for (const claim of claims) {
+    for (const bucket of claim.buckets) {
+      const existing = bucketMap.get(bucket.bucket) ?? {
+        baselineCount: 0,
+        ralphCount: 0,
+        sampleIds: new Set<string>(),
+      };
+      existing.baselineCount += bucket.baselineCount;
+      existing.ralphCount += bucket.ralphCount;
+      for (const sampleId of bucket.sampleIds) {
+        if (existing.sampleIds.size >= 5) {
+          break;
+        }
+        existing.sampleIds.add(sampleId);
+      }
+      bucketMap.set(bucket.bucket, existing);
+    }
+
+    if (!claim.hasForensicsFile) {
+      gaps.push({
+        artifactId: claim.artifactId,
+        claimName: claim.claimName,
+        experimentName: claim.experimentName,
+        gap: "missing_forensics_file",
+        modelName: claim.modelName,
+        providerName: claim.providerName,
+        updatedAt: claim.updatedAt,
+      });
+      continue;
+    }
+
+    if (!claim.hasErrorBuckets) {
+      gaps.push({
+        artifactId: claim.artifactId,
+        claimName: claim.claimName,
+        experimentName: claim.experimentName,
+        gap: "no_error_buckets",
+        modelName: claim.modelName,
+        providerName: claim.providerName,
+        updatedAt: claim.updatedAt,
+      });
+    }
+  }
+
+  const buckets = finalizeForensicsBuckets(bucketMap);
+  const summary = claims.reduce<BenchLabArtifactForensicsOverviewSummary>(
+    (accumulator, claim) => {
+      accumulator.artifacts += 1;
+      accumulator.baselineErrorItems += claim.baselineErrorItems;
+      accumulator.baselineTotalItems += claim.baselineTotalItems;
+      accumulator.ralphErrorItems += claim.ralphErrorItems;
+      accumulator.ralphTotalItems += claim.ralphTotalItems;
+      if (claim.hasForensicsFile) {
+        accumulator.artifactsWithForensicsFile += 1;
+      }
+      if (claim.hasErrorBuckets) {
+        accumulator.artifactsWithErrorBuckets += 1;
+      }
+      if (claim.baselineErrorItems > 0 || claim.ralphErrorItems > 0) {
+        accumulator.artifactsWithTrackedErrors += 1;
+      }
+      if (claim.outcome === "improved") {
+        accumulator.improvedArtifacts += 1;
+      } else if (claim.outcome === "regressed") {
+        accumulator.regressedArtifacts += 1;
+      } else if (claim.outcome === "flat") {
+        accumulator.flatArtifacts += 1;
+      }
+      if (claim.baselineErrorItems > claim.ralphErrorItems) {
+        accumulator.improvedErrorArtifacts += 1;
+      } else if (claim.baselineErrorItems < claim.ralphErrorItems) {
+        accumulator.regressedErrorArtifacts += 1;
+      } else {
+        accumulator.flatErrorArtifacts += 1;
+      }
+      return accumulator;
+    },
+    {
+      artifacts: 0,
+      artifactsWithErrorBuckets: 0,
+      artifactsWithForensicsFile: 0,
+      artifactsWithTrackedErrors: 0,
+      baselineErrorItems: 0,
+      baselineErrorRatePercent: 0,
+      baselineTotalItems: 0,
+      dominantBucket: null,
+      flatArtifacts: 0,
+      flatErrorArtifacts: 0,
+      improvedArtifacts: 0,
+      improvedErrorArtifacts: 0,
+      ralphErrorItems: 0,
+      ralphErrorRatePercent: 0,
+      ralphTotalItems: 0,
+      regressedArtifacts: 0,
+      regressedErrorArtifacts: 0,
+    }
+  );
+  summary.baselineErrorRatePercent = calculateErrorRate(
+    summary.baselineErrorItems,
+    summary.baselineTotalItems
+  );
+  summary.ralphErrorRatePercent = calculateErrorRate(
+    summary.ralphErrorItems,
+    summary.ralphTotalItems
+  );
+  summary.dominantBucket = buckets[0]?.bucket ?? null;
+
+  return {
+    buckets,
+    claims,
+    gaps,
+    summary,
+  };
+}
+
+function readModelRunForensicsSummary(
+  runtimeName: string,
+  modelRunName: string,
+  modelName: string | null,
+  providerName: string | null,
+  outcome: BenchLabArtifactOutcome,
+  errorForensicsPath: string
+): BenchLabForensicsModelSummary {
+  const payload = readJsonIfExists(errorForensicsPath);
+  const parsed = parseForensicsPayload(payload);
+  if (!payload) {
+    return buildEmptyForensicsModelSummary(
+      runtimeName,
+      modelRunName,
+      modelName,
+      providerName,
+      outcome
+    );
+  }
+
+  return {
+    baselineErrorItems: parsed.baselineErrorItems,
+    baselineErrorRatePercent: parsed.baselineErrorRatePercent,
+    baselineTotalItems: parsed.baselineTotalItems,
+    buckets: parsed.buckets,
+    deltaErrorItems: parsed.ralphErrorItems - parsed.baselineErrorItems,
+    dominantBucket: parsed.dominantBucket,
+    modelName,
+    name: modelRunName,
+    outcome,
+    providerName,
+    ralphErrorItems: parsed.ralphErrorItems,
+    ralphErrorRatePercent: parsed.ralphErrorRatePercent,
+    ralphTotalItems: parsed.ralphTotalItems,
     runtimeName,
   };
 }
@@ -2509,6 +2793,21 @@ export function createBenchLabApiServer(
     return true;
   }
 
+  function handleArtifactForensicsRoute(
+    request: IncomingMessage,
+    response: ServerResponse,
+    pathname: string
+  ): boolean {
+    if (
+      request.method !== "GET" ||
+      pathname !== "/v1/benchlab/artifacts/forensics"
+    ) {
+      return false;
+    }
+    sendJson(response, 200, listArtifactForensicsOverview(repoRoot));
+    return true;
+  }
+
   function handleArtifactDetailRoute(
     request: IncomingMessage,
     response: ServerResponse,
@@ -2724,6 +3023,8 @@ export function createBenchLabApiServer(
       handleArtifactsRoute(request, response, requestUrl.pathname),
     (request, response, requestUrl) =>
       handleBestArtifactsRoute(request, response, requestUrl.pathname),
+    (request, response, requestUrl) =>
+      handleArtifactForensicsRoute(request, response, requestUrl.pathname),
     (request, response, requestUrl) =>
       handleArtifactDetailRoute(request, response, requestUrl.pathname),
     (request, response, requestUrl) =>

@@ -77,6 +77,16 @@ Recent non-gain snapshot:
 - `gemini-cli-2-5-flash-lite` with `minimal` RALPH (`3` cases/category): `8.33 -> 8.33`, `flat`
 - Evidence: `experiments/gemini-cli-prompt-bfcl-ralph/artifacts/claim-gemini-cli-2-5-flash-lite-3-minimal/`
 
+## Failure Taxonomy Snapshot
+
+Checked-in artifact forensics are summarized in `docs/FAILURE_TAXONOMY.md`.
+
+Current checked-in snapshot (2026-03-07):
+- `6` checked-in claim artifacts include `error_forensics.json`; `1` currently has populated error buckets.
+- The dominant tracked bucket is `timeout`.
+- Best checked-in error reduction: `qwen3.5:4b` minimal reduced tracked errors from `6 -> 0` across `40` eval items (`15.0% -> 0.0%`).
+- BenchLab exposes the same aggregate view through `GET /v1/benchlab/artifacts/forensics`.
+
 ## Hiring Packet
 
 If you are using this repository as a portfolio artifact:
@@ -257,6 +267,7 @@ Key endpoints:
 - `GET /v1/benchlab/jobs/:id/logs`
 - `GET /v1/benchlab/artifacts`
 - `GET /v1/benchlab/artifacts/best`
+- `GET /v1/benchlab/artifacts/forensics`
 - `GET /v1/benchlab/artifacts/:id`
 - `GET /v1/benchlab/compare?left=<runtime>&right=<runtime>`
 - `GET /v1/benchlab/leaderboards/variants`
